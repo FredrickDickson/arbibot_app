@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from supabase import Client
 
-from ..dependencies import get_current_user_id, get_db, get_llm
-from ..services.llm_service import LLMService
+from ..dependencies import get_current_user_id, get_db, get_ai
+from ..agents.orchestrator import Orchestrator
 from ..models.schemas import (
     ChatMessageRequest,
     ChatMessageResponse,
@@ -68,9 +68,9 @@ async def send_message(
     request: ChatMessageRequest,
     user_id: str = Depends(get_current_user_id),
     db: Client = Depends(get_db),
-    llm: LLMService = Depends(get_llm),
+    ai: Orchestrator = Depends(get_ai),
 ):
-    """Send a message and get an AI response."""
+    """Send a message and get an AI response (Safety → LLM pipeline)."""
     conversation_id = request.conversation_id
 
     # Create conversation if none provided
@@ -109,9 +109,11 @@ async def send_message(
 
     messages = [{"role": m["role"], "content": m["content"]} for m in history.data]
 
-    # Generate AI response
-    llm_response = await llm.generate_response(messages)
-    ai_content = llm_response["content"]
+    # Generate AI response through orchestrator (Safety → LLM → Safety)
+    safe_response = await ai.chat(messages, jurisdiction=request.jurisdiction)
+    ai_content = safe_response.get("content", "")
+    confidence = safe_response.get("confidence", ConfidenceLevel.HIGH.value)
+    disclaimer = safe_response.get("disclaimer", "This is legal research assistance only, not legal advice.")
 
     # Save AI message
     ai_msg = {
@@ -120,8 +122,8 @@ async def send_message(
         "user_id": user_id,
         "role": MessageRole.ASSISTANT.value,
         "content": ai_content,
-        "confidence": ConfidenceLevel.HIGH.value,
-        "citations": json.dumps([]),
+        "confidence": confidence if isinstance(confidence, str) else confidence.value,
+        "citations": json.dumps(safe_response.get("citations", [])),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     db.table("messages").insert(ai_msg).execute()
@@ -136,9 +138,9 @@ async def send_message(
         conversation_id=conversation_id,
         role=MessageRole.ASSISTANT,
         content=ai_content,
-        confidence=ConfidenceLevel.HIGH,
+        confidence=ConfidenceLevel(confidence) if isinstance(confidence, str) else confidence,
         citations=[],
-        disclaimer="This is legal research assistance only, not legal advice.",
+        disclaimer=disclaimer,
         created_at=datetime.now(timezone.utc),
     )
 
@@ -148,9 +150,9 @@ async def send_message_stream(
     request: ChatMessageRequest,
     user_id: str = Depends(get_current_user_id),
     db: Client = Depends(get_db),
-    llm: LLMService = Depends(get_llm),
+    ai: Orchestrator = Depends(get_ai),
 ):
-    """Send a message and get a streaming AI response via SSE."""
+    """Send a message and get a streaming AI response via SSE (Safety pre-checked)."""
     conversation_id = request.conversation_id
 
     if not conversation_id:
@@ -189,7 +191,7 @@ async def send_message_stream(
 
     async def event_stream():
         full_content = []
-        async for chunk in llm.generate_stream(messages):
+        async for chunk in ai.chat_stream(messages, jurisdiction=request.jurisdiction):
             full_content.append(chunk)
             yield f"data: {json.dumps({'content': chunk})}\n\n"
 

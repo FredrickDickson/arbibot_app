@@ -44,6 +44,13 @@ app.*.map.json
 # Environment files
 .env
 *.env
+env.json
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
 
 # Android Studio will place build artifacts here
 /android/app/debug

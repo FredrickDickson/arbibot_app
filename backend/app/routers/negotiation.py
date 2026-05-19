@@ -4,8 +4,8 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
 
-from ..dependencies import get_current_user_id, get_db, get_llm
-from ..services.llm_service import LLMService
+from ..dependencies import get_current_user_id, get_db, get_ai
+from ..agents.orchestrator import Orchestrator
 from ..models.schemas import (
     NegotiationAnalysisRequest,
     NegotiationAnalysisResponse,
@@ -19,57 +19,17 @@ async def create_analysis(
     request: NegotiationAnalysisRequest,
     user_id: str = Depends(get_current_user_id),
     db: Client = Depends(get_db),
-    llm: LLMService = Depends(get_llm),
+    ai: Orchestrator = Depends(get_ai),
 ):
     """Generate BATNA/WATNA analysis and settlement strategy.
 
-    Provides risk-adjusted settlement ranges and negotiation guidance.
+    Safety → NegotiationAgent pipeline.
     Does NOT make final legal decisions.
     """
-    prompt = f"""Provide a negotiation analysis for the following dispute under {request.jurisdiction} jurisdiction.
-
-Dispute Summary: {request.dispute_summary}
-Party Positions: {request.party_positions}
-
-Generate a JSON response:
-{{
-    "batna": [
-        {{
-            "scenario": "Best Alternative to Negotiated Agreement scenario",
-            "likelihood": "high|medium|low",
-            "outcome_description": "Description of this alternative outcome",
-            "estimated_value": "Estimated monetary or strategic value"
-        }}
-    ],
-    "watna": [
-        {{
-            "scenario": "Worst Alternative to Negotiated Agreement scenario",
-            "likelihood": "high|medium|low",
-            "outcome_description": "Description of this worst-case outcome",
-            "estimated_value": "Estimated monetary or strategic value"
-        }}
-    ],
-    "settlement_range": {{
-        "minimum": "Minimum acceptable settlement",
-        "maximum": "Maximum reasonable settlement",
-        "recommended_zone": "Zone of possible agreement description",
-        "risk_factors": ["List of risk factors affecting the range"]
-    }},
-    "strategy_notes": "Strategic negotiation recommendations",
-    "mediation_brief": "Mediation preparation summary if applicable"
-}}
-
-IMPORTANT:
-- This is analytical support only, NOT a legal decision
-- Base analysis on Ghanaian legal principles and precedent outcomes
-- Consider costs of litigation/arbitration in value assessments
-- Identify key leverage points for each party
-- Never recommend a specific settlement amount as binding"""
-
-    messages = [{"role": "user", "content": prompt}]
-    result = await llm.generate_structured(
-        messages=messages,
-        response_format={"type": "json_object"},
+    result = await ai.do_negotiation(
+        dispute_summary=request.dispute_summary,
+        party_positions=request.party_positions,
+        jurisdiction=request.jurisdiction,
     )
 
     now = datetime.now(timezone.utc).isoformat()

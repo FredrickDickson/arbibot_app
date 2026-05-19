@@ -4,8 +4,8 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
 
-from ..dependencies import get_current_user_id, get_db, get_llm
-from ..services.llm_service import LLMService
+from ..dependencies import get_current_user_id, get_db, get_ai
+from ..agents.orchestrator import Orchestrator
 from ..models.schemas import (
     TimelineGenerateRequest,
     ComplianceChecklistRequest,
@@ -22,11 +22,11 @@ async def generate_timeline(
     request: TimelineGenerateRequest,
     user_id: str = Depends(get_current_user_id),
     db: Client = Depends(get_db),
-    llm: LLMService = Depends(get_llm),
+    ai: Orchestrator = Depends(get_ai),
 ):
     """Generate an arbitration timeline with key deadlines and milestones.
 
-    Based on the case details and applicable arbitration rules (default: Act 798).
+    Safety → ProceduralAgent pipeline. Based on Act 798 and applicable rules.
     """
     # Fetch case details
     case_result = (
@@ -41,42 +41,9 @@ async def generate_timeline(
         raise HTTPException(status_code=404, detail="Case not found")
 
     case = case_result.data
-    rules = request.arbitration_rules or case.get("arbitration_rules", "ADR Act 798")
+    case["arbitration_rules"] = request.arbitration_rules or case.get("arbitration_rules", "ADR Act 798")
 
-    prompt = f"""Generate an arbitration timeline for the following case under Ghanaian law.
-
-Case: {case.get('case_title', 'Untitled')}
-Case Number: {case.get('case_number', 'N/A')}
-Filing Date: {case.get('filing_date', 'Not specified')}
-Applicable Rules: {rules}
-Parties: {case.get('parties', {})}
-
-Generate a JSON response with:
-{{
-    "events": [
-        {{
-            "event_type": "deadline|hearing|filing|milestone",
-            "title": "Event title",
-            "description": "Event description with legal basis",
-            "due_date": "ISO 8601 date string",
-            "is_completed": false
-        }}
-    ],
-    "summary": "Brief case management summary"
-}}
-
-Base timelines on:
-- Alternative Dispute Resolution Act, 2010 (Act 798)
-- Ghana Arbitration Centre Rules (if applicable)
-- Standard arbitration procedural calendars
-
-Include: filing deadlines, response periods, hearing dates, award deadlines."""
-
-    messages = [{"role": "user", "content": prompt}]
-    result = await llm.generate_structured(
-        messages=messages,
-        response_format={"type": "json_object"},
-    )
+    result = await ai.do_timeline(case)
 
     now = datetime.now(timezone.utc).isoformat()
     saved_events = []
@@ -116,9 +83,9 @@ async def generate_checklist(
     request: ComplianceChecklistRequest,
     user_id: str = Depends(get_current_user_id),
     db: Client = Depends(get_db),
-    llm: LLMService = Depends(get_llm),
+    ai: Orchestrator = Depends(get_ai),
 ):
-    """Generate a compliance checklist for an arbitration case."""
+    """Generate a compliance checklist for an arbitration case (Safety → ProceduralAgent)."""
     case_result = (
         db.table("arbitration_cases")
         .select("*")
@@ -131,33 +98,7 @@ async def generate_checklist(
         raise HTTPException(status_code=404, detail="Case not found")
 
     case = case_result.data
-
-    prompt = f"""Generate a compliance checklist for arbitration proceedings under Ghanaian law.
-
-Case: {case.get('case_title', 'Untitled')}
-Rules: {case.get('arbitration_rules', 'ADR Act 798')}
-
-Provide a JSON response:
-{{
-    "checklist": [
-        {{
-            "requirement": "Description of the compliance requirement",
-            "status": "pending|completed|overdue",
-            "due_date": "ISO date or null",
-            "notes": "Relevant statutory reference or guidance"
-        }}
-    ],
-    "summary": "Brief compliance overview"
-}}
-
-Cover: jurisdictional requirements, notice provisions, disclosure obligations,
-procedural fairness requirements, award formalities under Act 798."""
-
-    messages = [{"role": "user", "content": prompt}]
-    result = await llm.generate_structured(
-        messages=messages,
-        response_format={"type": "json_object"},
-    )
+    result = await ai.do_checklist(case)
 
     checklist = [
         ComplianceItem(**item)

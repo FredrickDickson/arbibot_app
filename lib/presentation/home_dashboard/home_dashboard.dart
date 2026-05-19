@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sizer/sizer.dart';
+import 'package:provider/provider.dart';
 
 import 'package:arbibot/core/app_export.dart';
+import 'package:arbibot/services/auth_service.dart';
+import 'package:arbibot/services/api_service.dart';
 import '../../widgets/custom_app_bar.dart';
-import '../../widgets/custom_bottom_bar.dart';
+import '../../widgets/responsive_shell.dart';
+import '../../widgets/responsive_layout.dart';
 import 'package:arbibot/widgets/custom_icon_widget.dart';
 import './widgets/greeting_header_widget.dart';
 import './widgets/quick_action_card_widget.dart';
@@ -24,34 +28,30 @@ class _HomeDashboardState extends State<HomeDashboard> {
   int _currentBottomNavIndex = 0;
   final ScrollController _scrollController = ScrollController();
 
-  // Mock user data
-  final Map<String, dynamic> _userData = {
-    "name": "Dr. Kwame Mensah",
-    "title": "Senior Arbitrator",
-    "profileImage":
-        "https://img.rocket.new/generatedImages/rocket_gen_img_166211706-1763295957265.png",
-    "semanticLabel":
-        "Professional headshot of a man in formal attire with short black hair",
+  Map<String, dynamic> _userData = {
+    "name": "User",
+    "title": "",
+    "profileImage": "",
+    "semanticLabel": "User profile",
   };
 
-  // Mock quick stats data
-  final List<Map<String, dynamic>> _quickStats = [
+  List<Map<String, dynamic>> _quickStats = [
     {
       "label": "Recent Queries",
-      "value": "12",
+      "value": "0",
       "icon": "search",
       "color": Color(0xFF1E3A5F),
     },
     {
       "label": "Pending Drafts",
-      "value": "3",
+      "value": "0",
       "icon": "pending_actions",
       "color": Color(0xFF4A6741),
     },
     {
-      "label": "Saved Citations",
-      "value": "47",
-      "icon": "bookmark",
+      "label": "Active Cases",
+      "value": "0",
+      "icon": "gavel",
       "color": Color(0xFFB8860B),
     },
   ];
@@ -84,64 +84,58 @@ class _HomeDashboardState extends State<HomeDashboard> {
     },
   ];
 
-  // Mock recent activity data
-  final List<Map<String, dynamic>> _recentActivities = [
-    {
-      "id": "1",
-      "type": "research",
-      "title": "Arbitration Act 1961 - Section 12",
-      "subtitle": "Appointment of arbitrators",
-      "timestamp": DateTime.now().subtract(const Duration(hours: 2)),
-      "confidenceLevel": "high",
-      "isPinned": false,
-      "icon": "search",
-    },
-    {
-      "id": "2",
-      "type": "draft",
-      "title": "Statement of Case - Contract Dispute",
-      "subtitle": "Draft pending approval",
-      "timestamp": DateTime.now().subtract(const Duration(hours: 5)),
-      "confidenceLevel": "medium",
-      "isPinned": false,
-      "icon": "description",
-    },
-    {
-      "id": "3",
-      "type": "research",
-      "title": "Alternative Dispute Resolution Act 2010",
-      "subtitle": "Mediation procedures",
-      "timestamp": DateTime.now().subtract(const Duration(days: 1)),
-      "confidenceLevel": "high",
-      "isPinned": true,
-      "icon": "search",
-    },
-    {
-      "id": "4",
-      "type": "citation",
-      "title": "Republic v. High Court [2019] GHASC 45",
-      "subtitle": "Judicial review principles",
-      "timestamp": DateTime.now().subtract(const Duration(days: 2)),
-      "confidenceLevel": "high",
-      "isPinned": false,
-      "icon": "bookmark",
-    },
-    {
-      "id": "5",
-      "type": "draft",
-      "title": "Legal Opinion - Land Dispute",
-      "subtitle": "Approved and exported",
-      "timestamp": DateTime.now().subtract(const Duration(days: 3)),
-      "confidenceLevel": "high",
-      "isPinned": false,
-      "icon": "description",
-    },
-  ];
+  List<Map<String, dynamic>> _recentActivities = [];
 
   @override
   void initState() {
     super.initState();
-    _sortActivitiesByPinned();
+    _loadDashboardData();
+  }
+
+  Future<void> _loadDashboardData() async {
+    final auth = context.read<AuthService>();
+    final api = context.read<ApiService>();
+
+    // Load profile
+    final profile = await auth.getProfile();
+    if (profile != null && mounted) {
+      setState(() {
+        _userData = {
+          'name': profile['full_name'] ?? 'User',
+          'title': profile['title'] ?? '',
+          'profileImage': '',
+          'semanticLabel': 'User profile',
+        };
+      });
+    }
+
+    // Load stats and recent activity
+    try {
+      final conversations = await api.getConversations();
+      final drafts = await api.getDrafts();
+      final cases = await api.getCases();
+      final documents = await api.getDocuments();
+
+      if (!mounted) return;
+      setState(() {
+        _quickStats[0]['value'] = conversations.length.toString();
+        _quickStats[1]['value'] = drafts.where((d) => d['status'] == 'draft' || d['status'] == 'pending_review').length.toString();
+        _quickStats[2]['value'] = cases.length.toString();
+
+        _recentActivities = documents.take(5).map((d) {
+          return {
+            'id': d['id'],
+            'type': d['type'] ?? 'research',
+            'title': d['title'] ?? 'Untitled',
+            'subtitle': d['status'] ?? '',
+            'timestamp': DateTime.tryParse(d['updated_at'] ?? d['created_at'] ?? '') ?? DateTime.now(),
+            'confidenceLevel': 'high',
+            'isPinned': false,
+            'icon': (d['type'] ?? '').contains('draft') ? 'description' : 'search',
+          };
+        }).toList();
+      });
+    } catch (_) {}
   }
 
   @override
@@ -159,21 +153,9 @@ class _HomeDashboardState extends State<HomeDashboard> {
     });
   }
 
-  /// Handle pull-to-refresh
   Future<void> _handleRefresh() async {
     HapticFeedback.mediumImpact();
-
-    // Simulate refresh delay
-    await Future.delayed(const Duration(seconds: 1));
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Legal materials updated'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-    }
+    await _loadDashboardData();
   }
 
   /// Handle quick action tap
@@ -377,8 +359,18 @@ class _HomeDashboardState extends State<HomeDashboard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
+    return ResponsiveShell(
+      currentIndex: _currentBottomNavIndex,
+      onNavigationChanged: (index) {
+        setState(() => _currentBottomNavIndex = index);
+        HapticFeedback.lightImpact();
+        switch (index) {
+          case 0: break;
+          case 1: Navigator.pushNamed(context, '/chat-list-screen'); break;
+          case 2: Navigator.pushNamed(context, '/documents-library-screen'); break;
+          case 3: Navigator.pushNamed(context, '/profile-settings-screen'); break;
+        }
+      },
       appBar: CustomAppBar(
         title: 'ArbiBot',
         variant: AppBarVariant.standard,
@@ -403,7 +395,21 @@ class _HomeDashboardState extends State<HomeDashboard> {
           SizedBox(width: 2.w),
         ],
       ),
-      body: RefreshIndicator(
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _handleNewResearch,
+        icon: CustomIconWidget(
+          iconName: 'add',
+          color:
+              theme.floatingActionButtonTheme.foregroundColor ??
+              theme.colorScheme.onSecondary,
+          size: 24,
+        ),
+        label: const Text('New Research'),
+        tooltip: 'Start new legal research',
+      ),
+      body: ConstrainedContent(
+        maxWidth: 960,
+        child: RefreshIndicator(
         onRefresh: _handleRefresh,
         child: CustomScrollView(
           controller: _scrollController,
@@ -527,40 +533,6 @@ class _HomeDashboardState extends State<HomeDashboard> {
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _handleNewResearch,
-        icon: CustomIconWidget(
-          iconName: 'add',
-          color:
-              theme.floatingActionButtonTheme.foregroundColor ??
-              theme.colorScheme.onSecondary,
-          size: 24,
-        ),
-        label: const Text('New Research'),
-        tooltip: 'Start new legal research',
-      ),
-      bottomNavigationBar: CustomBottomBar(
-        currentIndex: _currentBottomNavIndex,
-        onTap: (index) {
-          setState(() => _currentBottomNavIndex = index);
-          HapticFeedback.lightImpact();
-
-          // Navigate based on index
-          switch (index) {
-            case 0:
-              // Already on home
-              break;
-            case 1:
-              Navigator.pushNamed(context, '/chat-list-screen');
-              break;
-            case 2:
-              Navigator.pushNamed(context, '/documents-library-screen');
-              break;
-            case 3:
-              Navigator.pushNamed(context, '/profile-settings-screen');
-              break;
-          }
-        },
       ),
     );
   }

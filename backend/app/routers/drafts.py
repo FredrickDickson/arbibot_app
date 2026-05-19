@@ -4,8 +4,8 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
 
-from ..dependencies import get_current_user_id, get_db, get_llm
-from ..services.llm_service import LLMService
+from ..dependencies import get_current_user_id, get_db, get_ai
+from ..agents.orchestrator import Orchestrator
 from ..models.schemas import (
     DraftCreateRequest,
     DraftResponse,
@@ -21,55 +21,19 @@ async def create_draft(
     request: DraftCreateRequest,
     user_id: str = Depends(get_current_user_id),
     db: Client = Depends(get_db),
-    llm: LLMService = Depends(get_llm),
+    ai: Orchestrator = Depends(get_ai),
 ):
     """Generate a legal document draft using AI.
 
+    Safety → DraftingAgent pipeline.
     Supports: Statement of Case, Legal Opinion, Submission.
     All drafts require mandatory human approval.
     """
-    draft_prompt = f"""Generate a professional legal document draft.
-
-Document Type: {request.document_type.value.replace('_', ' ').title()}
-Title: {request.title}
-Jurisdiction: {request.jurisdiction}
-Context: {request.context}
-
-Provide your response as JSON with this structure:
-{{
-    "sections": [
-        {{
-            "title": "Section title (e.g., '1. Introduction and Background')",
-            "content": "Detailed section content with proper legal language",
-            "confidence": "high|medium|low",
-            "citations": ["List of citation strings for this section"]
-        }}
-    ],
-    "citations": [
-        {{
-            "source": "Full name of legal authority",
-            "section": "Section reference",
-            "year": "Year",
-            "authority": "primary|secondary",
-            "verified": false
-        }}
-    ],
-    "legal_observations": ["Important legal observations about this draft"],
-    "optional_clauses": ["Optional clauses the user might want to include"],
-    "plain_english_explanation": "A plain-English summary of the document"
-}}
-
-IMPORTANT:
-- Use formal legal language appropriate for {request.jurisdiction} jurisdiction
-- Include relevant statutory and case law references
-- Structure sections logically for the document type
-- Never fabricate legal authorities
-- Mark all citations as verified: false (verification comes later)"""
-
-    messages = [{"role": "user", "content": draft_prompt}]
-    result = await llm.generate_structured(
-        messages=messages,
-        response_format={"type": "json_object"},
+    result = await ai.do_draft(
+        document_type=request.document_type,
+        title=request.title,
+        context=request.context,
+        jurisdiction=request.jurisdiction,
     )
 
     now = datetime.now(timezone.utc).isoformat()

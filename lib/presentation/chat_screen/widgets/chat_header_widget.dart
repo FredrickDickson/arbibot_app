@@ -9,11 +9,13 @@ import '../../../theme/app_theme.dart';
 class ChatHeaderWidget extends StatelessWidget {
   final String topic;
   final String? overallConfidence;
+  final VoidCallback? onSettingsTap;
 
   const ChatHeaderWidget({
     super.key,
     required this.topic,
     this.overallConfidence,
+    this.onSettingsTap,
   });
 
   @override
@@ -51,6 +53,13 @@ class ChatHeaderWidget extends StatelessWidget {
                 overallConfidence != null
                     ? _buildConfidenceIndicator(context, overallConfidence!)
                     : const SizedBox.shrink(),
+                if (onSettingsTap != null) SizedBox(width: 2.w),
+                if (onSettingsTap != null)
+                  IconButton(
+                    icon: const Icon(Icons.settings_outlined),
+                    onPressed: onSettingsTap,
+                    tooltip: 'AI Settings',
+                  ),
               ],
             ),
             SizedBox(height: 0.5.h),

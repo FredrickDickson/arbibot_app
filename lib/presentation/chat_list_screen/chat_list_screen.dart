@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sizer/sizer.dart';
+import 'package:provider/provider.dart';
 
 import 'package:arbibot/core/app_export.dart';
-import '../../widgets/custom_bottom_bar.dart';
+import 'package:arbibot/services/api_service.dart';
+import '../../widgets/responsive_shell.dart';
+import '../../widgets/responsive_layout.dart';
 import 'package:arbibot/widgets/custom_icon_widget.dart';
 import './widgets/conversation_card_widget.dart';
 import './widgets/delete_confirmation_dialog.dart';
@@ -25,68 +28,47 @@ class _ChatListScreenState extends State<ChatListScreen> {
   final Set<int> _selectedConversations = {};
   bool _isMultiSelectMode = false;
   String _searchQuery = '';
+  List<Map<String, dynamic>> _conversations = [];
 
-  // Mock data for legal conversations
-  final List<Map<String, dynamic>> _conversations = [
-    {
-      'id': 1,
-      'title': 'Contract Law: Breach of Agreement',
-      'lastMessage':
-          'What are the remedies for breach of contract under Ghanaian law?',
-      'timestamp': '2 hours ago',
-      'legalTopic': 'contract',
-      'confidence': 'high',
-      'isPinned': true,
-    },
-    {
-      'id': 2,
-      'title': 'Tort Law: Negligence Claims',
-      'lastMessage':
-          'Explain the elements of negligence in personal injury cases.',
-      'timestamp': '5 hours ago',
-      'legalTopic': 'tort',
-      'confidence': 'high',
-      'isPinned': false,
-    },
-    {
-      'id': 3,
-      'title': 'Constitutional Law: Fundamental Rights',
-      'lastMessage':
-          'What are the fundamental human rights protected under the 1992 Constitution?',
-      'timestamp': 'Yesterday',
-      'legalTopic': 'constitutional',
-      'confidence': 'medium',
-      'isPinned': false,
-    },
-    {
-      'id': 4,
-      'title': 'Criminal Law: Theft Offences',
-      'lastMessage':
-          'What is the legal definition of theft under the Criminal Offences Act?',
-      'timestamp': '2 days ago',
-      'legalTopic': 'criminal',
-      'confidence': 'high',
-      'isPinned': false,
-    },
-    {
-      'id': 5,
-      'title': 'Land Law: Property Disputes',
-      'lastMessage': 'How are land disputes resolved in Ghana?',
-      'timestamp': '3 days ago',
-      'legalTopic': 'contract',
-      'confidence': 'medium',
-      'isPinned': false,
-    },
-    {
-      'id': 6,
-      'title': 'Family Law: Divorce Proceedings',
-      'lastMessage': 'What are the grounds for divorce under Ghanaian law?',
-      'timestamp': '1 week ago',
-      'legalTopic': 'constitutional',
-      'confidence': 'low',
-      'isPinned': false,
-    },
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _fetchConversations();
+  }
+
+  Future<void> _fetchConversations() async {
+    try {
+      final api = context.read<ApiService>();
+      final data = await api.getConversations();
+      if (!mounted) return;
+      setState(() {
+        _conversations = data.map((c) {
+          return {
+            'id': c['id'],
+            'title': c['title'] ?? 'Untitled',
+            'lastMessage': c['topic'] ?? '',
+            'timestamp': _formatTimestamp(c['updated_at']),
+            'legalTopic': 'general',
+            'confidence': 'high',
+            'isPinned': false,
+          };
+        }).toList();
+      });
+    } catch (e) {
+      if (!mounted) return;
+    }
+  }
+
+  String _formatTimestamp(String? ts) {
+    if (ts == null) return '';
+    final dt = DateTime.tryParse(ts);
+    if (dt == null) return ts;
+    final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    return '${dt.day}/${dt.month}/${dt.year}';
+  }
 
   List<Map<String, dynamic>> get _filteredConversations {
     if (_searchQuery.isEmpty) {
@@ -107,15 +89,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   }
 
   Future<void> _handleRefresh() async {
-    await Future.delayed(const Duration(seconds: 2));
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Conversations synced successfully'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-    }
+    await _fetchConversations();
   }
 
   void _handleSearch(String query) {
@@ -136,7 +110,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
       });
     } else {
       HapticFeedback.lightImpact();
-      Navigator.pushNamed(context, '/chat-screen', arguments: conversationId);
+      final conv = _conversations.firstWhere((c) => c['id'] == conversationId, orElse: () => {});
+      Navigator.pushNamed(context, '/chat-screen', arguments: {
+        'conversation_id': conv['id'],
+        'title': conv['title'],
+      });
     }
   }
 
@@ -271,7 +249,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    return Scaffold(
+    return ResponsiveShell(
+      currentIndex: 1,
+      onNavigationChanged: (index) {
+        HapticFeedback.lightImpact();
+        switch (index) {
+          case 0: Navigator.pushReplacementNamed(context, '/home-dashboard'); break;
+          case 1: break;
+          case 2: Navigator.pushReplacementNamed(context, '/documents-library-screen'); break;
+          case 3: Navigator.pushReplacementNamed(context, '/profile-settings-screen'); break;
+        }
+      },
       appBar: _isMultiSelectMode
           ? AppBar(
               leading: IconButton(
@@ -332,7 +320,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 ),
               ],
             ),
-      body: SafeArea(
+      body: ConstrainedContent(
+        maxWidth: 960,
+        child: SafeArea(
         child: _conversations.isEmpty
             ? EmptyStateWidget(onStartResearch: _handleNewQuery)
             : RefreshIndicator(
@@ -409,6 +399,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 ),
               ),
       ),
+      ),
       floatingActionButton: _isMultiSelectMode
           ? null
           : FloatingActionButton.extended(
@@ -425,31 +416,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 ),
               ),
             ),
-      bottomNavigationBar: CustomBottomBar(
-        currentIndex: 1,
-        onTap: (index) {
-          HapticFeedback.lightImpact();
-          switch (index) {
-            case 0:
-              Navigator.pushReplacementNamed(context, '/home-dashboard');
-              break;
-            case 1:
-              break;
-            case 2:
-              Navigator.pushReplacementNamed(
-                context,
-                '/documents-library-screen',
-              );
-              break;
-            case 3:
-              Navigator.pushReplacementNamed(
-                context,
-                '/profile-settings-screen',
-              );
-              break;
-          }
-        },
-      ),
     );
   }
 }

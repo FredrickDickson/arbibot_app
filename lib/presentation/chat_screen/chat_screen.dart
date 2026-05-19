@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sizer/sizer.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:arbibot/core/app_export.dart';
+import 'package:arbibot/services/api_service.dart';
+import 'package:arbibot/services/local_model_service.dart';
+import 'package:arbibot/services/local_inference_service.dart';
+import '../../widgets/responsive_layout.dart';
 import './widgets/chat_header_widget.dart';
 import './widgets/legal_disclaimer_banner_widget.dart';
 import './widgets/message_bubble_widget.dart';
@@ -25,138 +31,155 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isTyping = false;
   bool _showDisclaimer = false;
   String? _disclaimerConfidence;
-  final String _conversationTopic = 'Arbitration Law Discussion';
+  String _conversationTopic = 'New Conversation';
   String? _overallConfidence;
+  String? _conversationId;
+  
+  // Local inference
+  late LocalModelService _modelService;
+  late LocalInferenceService _inferenceService;
+  bool _useLocalInference = false;
+  bool _isDownloadingModel = false;
+  double _downloadProgress = 0.0;
+  
+  // RAG settings
+  bool _useRAG = true;
 
   @override
   void initState() {
     super.initState();
-    _loadMockConversation();
+    _initializeLocalInference();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+      if (args != null && args['conversation_id'] != null) {
+        _conversationId = args['conversation_id'] as String;
+        _conversationTopic = args['title'] as String? ?? 'Conversation';
+        _loadConversation();
+      }
+    });
+  }
+
+  Future<void> _initializeLocalInference() async {
+    _modelService = LocalModelService();
+    _inferenceService = LocalInferenceService(_modelService);
+    
+    await _modelService.initialize();
+    
+    final prefs = await SharedPreferences.getInstance();
+    _useLocalInference = prefs.getBool('use_local_inference') ?? false;
+    _useRAG = prefs.getBool('use_rag') ?? true;
+    
+    if (_modelService.isModelDownloaded) {
+      try {
+        await _inferenceService.initialize();
+        final api = context.read<ApiService>();
+        api.setLocalInferenceService(_inferenceService);
+        api.setUseLocalInference(_useLocalInference);
+        setState(() {});
+      } catch (e) {
+        // Model exists but failed to load
+      }
+    }
   }
 
   @override
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
+    _inferenceService.dispose();
+    _modelService.dispose();
     super.dispose();
   }
 
-  void _loadMockConversation() {
-    setState(() {
-      _messages.addAll([
-        {
-          "id": 1,
-          "isUser": true,
-          "content":
-              "What are the key provisions of the Alternative Dispute Resolution Act, 2010 (Act 798) regarding arbitration agreements?",
-          "timestamp": DateTime.now().subtract(const Duration(minutes: 15)),
-        },
-        {
-          "id": 2,
-          "isUser": false,
-          "content":
-              "The Alternative Dispute Resolution Act, 2010 (Act 798) establishes comprehensive provisions for arbitration agreements in Ghana. Section 4 defines an arbitration agreement as a written agreement to submit present or future disputes to arbitration. The Act requires arbitration agreements to be in writing, which includes electronic communications under Section 4(2).",
-          "timestamp": DateTime.now().subtract(const Duration(minutes: 14)),
-          "confidence": "high",
-          "citations": [
-            {
-              "source": "Alternative Dispute Resolution Act, 2010 (Act 798)",
-              "section": "Section 4",
-              "page": 12,
-              "authority": "primary",
-            },
-            {
-              "source": "Alternative Dispute Resolution Act, 2010 (Act 798)",
-              "section": "Section 4(2)",
-              "page": 13,
-              "authority": "primary",
-            },
-          ],
-        },
-        {
-          "id": 3,
-          "isUser": true,
-          "content":
-              "Can you explain the requirements for enforcing foreign arbitral awards in Ghana?",
-          "timestamp": DateTime.now().subtract(const Duration(minutes: 10)),
-        },
-        {
-          "id": 4,
-          "isUser": false,
-          "content":
-              "Foreign arbitral awards are enforceable in Ghana under the Alternative Dispute Resolution Act, 2010 (Act 798), which incorporates the New York Convention principles. Section 54 provides that a foreign arbitral award shall be recognized as binding and enforced subject to the provisions of the Act. The party seeking enforcement must submit the original award or certified copy, along with the arbitration agreement.",
-          "timestamp": DateTime.now().subtract(const Duration(minutes: 9)),
-          "confidence": "medium",
-          "citations": [
-            {
-              "source": "Alternative Dispute Resolution Act, 2010 (Act 798)",
-              "section": "Section 54",
-              "page": 45,
-              "authority": "primary",
-            },
-          ],
-        },
-      ]);
-      _overallConfidence = 'high';
-    });
+  Future<void> _loadConversation() async {
+    if (_conversationId == null) return;
+    try {
+      final api = context.read<ApiService>();
+      final messages = await api.getMessages(_conversationId!);
+      setState(() {
+        _messages.clear();
+        for (final m in messages) {
+          _messages.add({
+            'id': m['id'],
+            'isUser': m['role'] == 'user',
+            'content': m['content'] ?? '',
+            'timestamp': DateTime.tryParse(m['created_at'] ?? '') ?? DateTime.now(),
+            'confidence': m['confidence'],
+            'citations': m['citations'] is List ? m['citations'] : [],
+          });
+        }
+      });
+      _scrollToBottom();
+    } catch (e) {
+      // Silently handle — empty chat is fine
+    }
   }
 
-  void _sendMessage() {
+  void _sendMessage() async {
     final text = _messageController.text.trim();
-    text.isEmpty
-        ? null
-        : () {
-            setState(() {
-              _messages.add({
-                "id": _messages.length + 1,
-                "isUser": true,
-                "content": text,
-                "timestamp": DateTime.now(),
-              });
-              _isTyping = true;
-            });
+    if (text.isEmpty) return;
 
-            _messageController.clear();
-            _scrollToBottom();
+    setState(() {
+      _messages.add({
+        'id': 'temp_${DateTime.now().millisecondsSinceEpoch}',
+        'isUser': true,
+        'content': text,
+        'timestamp': DateTime.now(),
+      });
+      _isTyping = true;
+    });
 
-            Future.delayed(const Duration(seconds: 3), () {
-              setState(() {
-                _isTyping = false;
-                final confidence = [
-                  'high',
-                  'medium',
-                  'low',
-                ][DateTime.now().second % 3];
+    _messageController.clear();
+    _scrollToBottom();
 
-                _messages.add({
-                  "id": _messages.length + 1,
-                  "isUser": false,
-                  "content":
-                      "Based on the Alternative Dispute Resolution Act, 2010 (Act 798), $text requires careful consideration of the statutory provisions and relevant case law. The legal framework provides specific guidance on this matter, which should be reviewed in conjunction with the applicable regulations.",
-                  "timestamp": DateTime.now(),
-                  "confidence": confidence,
-                  "citations": [
-                    {
-                      "source":
-                          "Alternative Dispute Resolution Act, 2010 (Act 798)",
-                      "section": "Section ${10 + DateTime.now().second % 50}",
-                      "page": 20 + DateTime.now().second % 30,
-                      "authority": "primary",
-                    },
-                  ],
-                });
+    try {
+      final api = context.read<ApiService>();
+      Map<String, dynamic> response;
 
-                (confidence == 'medium' || confidence == 'low')
-                    ? () {
-                        _showDisclaimer = true;
-                        _disclaimerConfidence = confidence;
-                      }()
-                    : null;
+      if (_useLocalInference && api.isLocalInferenceAvailable) {
+        response = await api.sendMessageLocal(content: text);
+      } else {
+        response = await api.sendMessage(
+          conversationId: _conversationId,
+          content: text,
+        );
+      }
 
-                _scrollToBottom();
-              });
-            });
-          }();
+      if (!mounted) return;
+
+      setState(() {
+        _isTyping = false;
+        _conversationId ??= response['conversation_id'];
+        if (_conversationTopic == 'New Conversation') {
+          _conversationTopic = text.length > 40 ? '${text.substring(0, 40)}...' : text;
+        }
+
+        final confidence = response['confidence'] ?? 'high';
+        _messages.add({
+          'id': response['id'],
+          'isUser': false,
+          'content': response['content'] ?? '',
+          'timestamp': DateTime.tryParse(response['created_at'] ?? '') ?? DateTime.now(),
+          'confidence': confidence,
+          'citations': response['citations'] is List ? response['citations'] : [],
+          'is_local': response['is_local'] ?? false,
+        });
+
+        _overallConfidence = confidence;
+
+        if (confidence == 'medium' || confidence == 'low') {
+          _showDisclaimer = true;
+          _disclaimerConfidence = confidence;
+        }
+      });
+      _scrollToBottom();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isTyping = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to send: ${e.toString()}')),
+      );
+    }
   }
 
   void _scrollToBottom() {
@@ -289,12 +312,228 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _refreshConversation() async {
-    await Future.delayed(const Duration(seconds: 1));
-    setState(() {
-      _messages.clear();
-      _loadMockConversation();
-    });
+    await _loadConversation();
   }
+
+  Future<void> _toggleLocalInference(bool value) async {
+    if (value && !_modelService.isModelDownloaded) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please download the model first')),
+      );
+      return;
+    }
+
+    setState(() {
+      _useLocalInference = value;
+    });
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('use_local_inference', value);
+    
+    final api = context.read<ApiService>();
+    api.setUseLocalInference(value);
+  }
+
+  Future<void> _toggleRAG(bool value) async {
+    setState(() {
+      _useRAG = value;
+    });
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('use_rag', value);
+  }
+
+  Future<void> _downloadModel() async {
+    if (_isDownloadingModel) return;
+    
+    setState(() {
+      _isDownloadingModel = true;
+      _downloadProgress = 0.0;
+    });
+
+    try {
+      await _modelService.downloadModel(onProgress: (progress) {
+        setState(() {
+          _downloadProgress = progress;
+        });
+      });
+
+      await _inferenceService.initialize();
+      final api = context.read<ApiService>();
+      api.setLocalInferenceService(_inferenceService);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Model downloaded successfully')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to download model: ${e.toString()}')),
+      );
+    } finally {
+      setState(() {
+        _isDownloadingModel = false;
+      });
+    }
+  }
+
+  void _showSettingsBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => _buildSettingsSheet(),
+    );
+  }
+
+  Widget _buildSettingsSheet() {
+    final theme = Theme.of(context);
+    
+    return Container(
+      padding: EdgeInsets.symmetric(vertical: 2.h, horizontal: 4.w),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'AI Settings',
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          SizedBox(height: 2.h),
+          
+          // Model status
+          ListTile(
+            title: Text(
+              _isDownloadingModel ? 'Downloading AI Assistant...' : 
+              _modelService.isModelDownloaded ? 'AI Assistant Ready' : 'Download AI Assistant',
+            ),
+            subtitle: Text(
+              _isDownloadingModel 
+                  ? 'This is a one-time download'
+                  : _modelService.isModelDownloaded
+                  ? 'Model downloaded and ready'
+                  : 'Get local AI for offline use (2GB download)',
+            ),
+            leading: Icon(
+              _modelService.isModelDownloaded ? Icons.check_circle : 
+              _isDownloadingModel ? Icons.cloud_download : Icons.download,
+              color: _modelService.isModelDownloaded
+                      ? Colors.green
+                      : theme.colorScheme.primary,
+            ),
+            trailing: _isDownloadingModel
+                ? SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      value: _downloadProgress,
+                      strokeWidth: 2,
+                    ),
+                  )
+                : null,
+          ),
+          
+          if (!_modelService.isModelDownloaded && !_isDownloadingModel)
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 4.w),
+              child: ElevatedButton.icon(
+                onPressed: _downloadModel,
+                icon: const Icon(Icons.download),
+                label: const Text('Download AI Assistant'),
+                style: ElevatedButton.styleFrom(
+                  minimumSize: Size(double.infinity, 48),
+                ),
+              ),
+            ),
+          
+          if (_isDownloadingModel)
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 4.w),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  LinearProgressIndicator(
+                    value: _downloadProgress,
+                  ),
+                  SizedBox(height: 0.5.h),
+                  Text(
+                    '${(_downloadProgress * 100).toInt()}%',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+          
+          SizedBox(height: 1.h),
+          
+          // Local inference toggle
+          SwitchListTile(
+            title: const Text('Use Local AI'),
+            subtitle: const Text('Run AI inference on device (offline)'),
+            value: _useLocalInference,
+            onChanged: _modelService.isModelDownloaded
+                ? _toggleLocalInference
+                : null,
+          ),
+          
+          SizedBox(height: 1.h),
+          
+          // RAG toggle
+          SwitchListTile(
+            title: const Text('Use RAG (Retrieval-Augmented Generation)'),
+            subtitle: const Text('Retrieve relevant legal documents for context'),
+            value: _useRAG,
+            onChanged: _toggleRAG,
+          ),
+          
+          SizedBox(height: 2.h),
+          
+          // Info text
+          Container(
+            padding: EdgeInsets.all(3.w),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceVariant,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      size: 16,
+                      color: theme.colorScheme.primary,
+                    ),
+                    SizedBox(width: 2.w),
+                    Text(
+                      'Local AI Information',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: 1.h),
+                Text(
+                  '• Model: Gemma 3n (4-bit quantized)\n'
+                  '• Size: ~2GB\n'
+                  '• Context: 8K tokens\n'
+                  '• Speed: 3-6 tokens/second\n'
+                  '• Works offline\n'
+                  '• Privacy: All data stays on device',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -310,11 +549,14 @@ class _ChatScreenState extends State<ChatScreen> {
           systemOverlayStyle: SystemUiOverlayStyle.dark,
         ),
       ),
-      body: Column(
+      body: ConstrainedContent(
+        maxWidth: 960,
+        child: Column(
         children: [
           ChatHeaderWidget(
             topic: _conversationTopic,
             overallConfidence: _overallConfidence,
+            onSettingsTap: _showSettingsBottomSheet,
           ),
           Expanded(
             child: RefreshIndicator(
@@ -395,6 +637,7 @@ class _ChatScreenState extends State<ChatScreen> {
             isEnabled: !_isTyping,
           ),
         ],
+      ),
       ),
     );
   }

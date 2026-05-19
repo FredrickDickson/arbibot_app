@@ -1,8 +1,10 @@
-import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:arbibot/core/app_export.dart';
+
+import 'dart:io' if (dart.library.html) 'stub_io.dart';
 
 extension ImageTypeExtension on String {
   ImageType get imageType {
@@ -128,6 +130,15 @@ class CustomImageWidget extends StatelessWidget {
             ),
           );
         case ImageType.file:
+          if (kIsWeb) {
+            return Image.asset(
+              placeHolder,
+              height: height,
+              width: width,
+              fit: fit ?? BoxFit.cover,
+              semanticLabel: semanticLabel,
+            );
+          }
           return Image.file(
             File(imageUrl!),
             height: height,

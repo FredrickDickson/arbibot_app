@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sizer/sizer.dart';
+import 'package:provider/provider.dart';
 
 import 'package:arbibot/core/app_export.dart';
 import 'package:arbibot/widgets/custom_icon_widget.dart';
+import 'package:arbibot/services/auth_service.dart';
 import './widgets/biometric_prompt_widget.dart';
 import './widgets/email_input_widget.dart';
 import './widgets/login_button_widget.dart';
@@ -28,28 +30,6 @@ class _AuthenticationScreenState extends State<AuthenticationScreen> {
   String? _errorMessage;
   bool _showBiometricPrompt = false;
 
-  // Mock credentials for Ghana Bar Association verified members
-  final Map<String, Map<String, dynamic>> _mockCredentials = {
-    "kwame.mensah@gba.gh": {
-      "password": "LegalPro2025!",
-      "name": "Kwame Mensah",
-      "verified": true,
-      "barNumber": "GBA/2018/4521",
-    },
-    "ama.asante@lawfirm.gh": {
-      "password": "Arbitrator123!",
-      "name": "Ama Asante",
-      "verified": true,
-      "barNumber": "GBA/2015/3892",
-    },
-    "kofi.boateng@legal.gh": {
-      "password": "LegalAI2025!",
-      "name": "Kofi Boateng",
-      "verified": false,
-      "barNumber": "GBA/2022/6734",
-    },
-  };
-
   @override
   void dispose() {
     _emailController.dispose();
@@ -67,57 +47,25 @@ class _AuthenticationScreenState extends State<AuthenticationScreen> {
       _errorMessage = null;
     });
 
-    // Dismiss keyboard
     FocusScope.of(context).unfocus();
 
     try {
-      // Simulate network delay
-      await Future.delayed(const Duration(seconds: 2));
-
+      final auth = context.read<AuthService>();
       final email = _emailController.text.trim().toLowerCase();
       final password = _passwordController.text;
 
-      // Check credentials
-      if (_mockCredentials.containsKey(email)) {
-        final userData = _mockCredentials[email]!;
-        if (userData["password"] == password) {
-          // Successful authentication
-          HapticFeedback.mediumImpact();
+      final success = await auth.signIn(email: email, password: password);
 
-          // Show biometric prompt for verified members
-          if (userData["verified"] == true) {
-            setState(() {
-              _showBiometricPrompt = true;
-              _isLoading = false;
-            });
+      if (!mounted) return;
 
-            // Auto-dismiss biometric prompt and navigate
-            await Future.delayed(const Duration(seconds: 2));
-            if (mounted) {
-              Navigator.pushReplacementNamed(context, '/home-dashboard');
-            }
-          } else {
-            // Navigate directly for unverified members
-            if (mounted) {
-              Navigator.pushReplacementNamed(context, '/home-dashboard');
-            }
-          }
-          return;
-        } else {
-          setState(() {
-            _errorMessage =
-                "Invalid password. Please check your credentials and try again.";
-            _isLoading = false;
-          });
-          return;
-        }
+      if (success) {
+        HapticFeedback.mediumImpact();
+        Navigator.pushReplacementNamed(context, '/home-dashboard');
       } else {
         setState(() {
-          _errorMessage =
-              "Account not found. Please verify your email address.";
+          _errorMessage = auth.error ?? 'Login failed. Please try again.';
           _isLoading = false;
         });
-        return;
       }
     } catch (e) {
       setState(() {

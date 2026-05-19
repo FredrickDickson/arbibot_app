@@ -17,6 +17,7 @@ from .routers import (
     procedural,
     negotiation,
     cases,
+    ingestion,
 )
 
 settings = get_settings()
@@ -55,6 +56,7 @@ app.include_router(documents.router)
 app.include_router(procedural.router)
 app.include_router(negotiation.router)
 app.include_router(cases.router)
+app.include_router(ingestion.router)
 
 # ── Health Check ─────────────────────────────────────────────────────
 

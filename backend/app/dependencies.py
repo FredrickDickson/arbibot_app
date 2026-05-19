@@ -2,6 +2,7 @@ from fastapi import Depends, Request, HTTPException, status
 
 from .services.supabase_client import get_supabase_client, get_supabase_anon_client
 from .services.llm_service import get_llm_service, LLMService
+from .agents.orchestrator import get_orchestrator, Orchestrator
 from .config import get_settings, Settings
 
 
@@ -35,3 +36,8 @@ async def get_llm() -> LLMService:
 async def get_app_settings() -> Settings:
     """Get application settings."""
     return get_settings()
+
+
+async def get_ai(db = Depends(get_db)) -> Orchestrator:
+    """Get the AI orchestrator (Safety → Agent pipeline)."""
+    return get_orchestrator(db)

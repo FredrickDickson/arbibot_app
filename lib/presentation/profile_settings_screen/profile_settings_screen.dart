@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sizer/sizer.dart';
+import 'package:provider/provider.dart';
 
 import 'package:arbibot/core/app_export.dart';
+import 'package:arbibot/services/auth_service.dart';
 import '../../widgets/custom_app_bar.dart';
-import '../../widgets/custom_bottom_bar.dart';
+import '../../widgets/responsive_shell.dart';
+import '../../widgets/responsive_layout.dart';
 import './widgets/profile_header_widget.dart';
 import './widgets/settings_item_widget.dart';
 import './widgets/settings_section_widget.dart';
@@ -22,17 +25,39 @@ class ProfileSettingsScreen extends StatefulWidget {
 class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   int _currentBottomNavIndex = 3;
 
-  // Mock user data
-  final Map<String, dynamic> _userData = {
-    "name": "Kwame Mensah",
-    "membershipId": "GBA/2018/4521",
-    "isVerified": true,
-    "photoUrl":
-        "https://img.rocket.new/generatedImages/rocket_gen_img_124d0847c-1766495625052.png",
-    "practiceAreas": ["Commercial Law", "Arbitration", "Contract Law"],
-    "yearsOfExperience": 7,
-    "specializations": "International Arbitration, ADR",
+  Map<String, dynamic> _userData = {
+    "name": "User",
+    "membershipId": "",
+    "isVerified": false,
+    "photoUrl": "",
+    "practiceAreas": <String>[],
+    "yearsOfExperience": 0,
+    "specializations": "",
   };
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  Future<void> _loadProfile() async {
+    final auth = context.read<AuthService>();
+    final profile = await auth.getProfile();
+    if (profile != null && mounted) {
+      setState(() {
+        _userData = {
+          'name': profile['full_name'] ?? 'User',
+          'membershipId': '',
+          'isVerified': true,
+          'photoUrl': '',
+          'practiceAreas': <String>[],
+          'yearsOfExperience': 0,
+          'specializations': profile['title'] ?? '',
+        };
+      });
+    }
+  }
 
   // Settings state
   bool _biometricAuth = true;
@@ -233,8 +258,9 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
+    return ResponsiveShell(
+      currentIndex: _currentBottomNavIndex,
+      onNavigationChanged: _handleBottomNavTap,
       appBar: CustomAppBar(
         title: 'Profile & Settings',
         variant: AppBarVariant.surface,
@@ -258,7 +284,9 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
         ],
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
+        child: ConstrainedContent(
+          maxWidth: 840,
+          child: SingleChildScrollView(
           child: Column(
             children: [
               ProfileHeaderWidget(
@@ -551,10 +579,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
             ],
           ),
         ),
-      ),
-      bottomNavigationBar: CustomBottomBar(
-        currentIndex: _currentBottomNavIndex,
-        onTap: _handleBottomNavTap,
+        ),
       ),
     );
   }

@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
 
+    # RAG Ingestion
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    TAVILY_API_KEY: str = ""
+
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
     API_DEBUG: bool = True

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -38,15 +39,16 @@ class _ProfileHeaderWidgetState extends State<ProfileHeaderWidget> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              leading: CustomIconWidget(
-                iconName: 'camera_alt',
-                color: Theme.of(context).colorScheme.primary,
-                size: 24,
+            if (!kIsWeb)
+              ListTile(
+                leading: CustomIconWidget(
+                  iconName: 'camera_alt',
+                  color: Theme.of(context).colorScheme.primary,
+                  size: 24,
+                ),
+                title: const Text('Take Photo'),
+                onTap: () => Navigator.pop(context, 'camera'),
               ),
-              title: const Text('Take Photo'),
-              onTap: () => Navigator.pop(context, 'camera'),
-            ),
             ListTile(
               leading: CustomIconWidget(
                 iconName: 'photo_library',

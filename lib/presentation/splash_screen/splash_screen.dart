@@ -1,9 +1,13 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sizer/sizer.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:arbibot/core/app_export.dart';
 import 'package:arbibot/widgets/custom_icon_widget.dart';
+import 'package:arbibot/services/auth_service.dart';
 
 /// Splash Screen for ArbiBot Legal Intelligence Application
 /// Provides branded app launch experience while initializing legal services
@@ -104,16 +108,15 @@ class _SplashScreenState extends State<SplashScreen>
     }
   }
 
-  /// Mock authentication status check
   Future<bool> _checkAuthenticationStatus() async {
-    // In production, check secure storage for auth tokens
-    return false; // Default to not authenticated for demo
+    final auth = context.read<AuthService>();
+    if (auth.isAuthenticated) return true;
+    return await auth.refreshSession();
   }
 
-  /// Mock disclaimer acceptance check
   Future<bool> _checkDisclaimerStatus() async {
-    // In production, check if user has accepted legal disclaimer
-    return false; // Default to not accepted for demo
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('accepted_disclaimer') ?? false;
   }
 
   @override
@@ -128,14 +131,16 @@ class _SplashScreenState extends State<SplashScreen>
     final colorScheme = theme.colorScheme;
 
     // Set system UI overlay style for professional appearance
-    SystemChrome.setSystemUIOverlayStyle(
-      SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent,
-        statusBarIconBrightness: Brightness.light,
-        systemNavigationBarColor: colorScheme.primary,
-        systemNavigationBarIconBrightness: Brightness.light,
-      ),
-    );
+    if (!kIsWeb) {
+      SystemChrome.setSystemUIOverlayStyle(
+        SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.light,
+          systemNavigationBarColor: colorScheme.primary,
+          systemNavigationBarIconBrightness: Brightness.light,
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: colorScheme.primary,
