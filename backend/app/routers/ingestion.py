@@ -164,7 +164,7 @@ async def search_similar_chunks(
 
 @router.get("/health")
 async def health_check():
-    """Check if Ollama embedding service is available."""
+    """Check if Ollama embedding service is available (public endpoint)."""
     try:
         embedding_service = get_embedding_service()
         is_healthy = embedding_service.check_connection()

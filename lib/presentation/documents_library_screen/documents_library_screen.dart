@@ -29,6 +29,8 @@ class DocumentsLibraryScreen extends StatefulWidget {
 
 class _DocumentsLibraryScreenState extends State<DocumentsLibraryScreen> {
   final TextEditingController _searchController = TextEditingController();
+  final TextEditingController sourceController = TextEditingController(text: 'statute');
+  final TextEditingController jurisdictionController = TextEditingController();
   final List<String> _activeFilters = [];
   bool _isMultiSelectMode = false;
   final Set<int> _selectedDocuments = {};

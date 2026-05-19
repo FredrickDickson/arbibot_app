@@ -1,11 +1,15 @@
 import 'dart:async';
-import 'package:flutter_llama/flutter_llama.dart';
+import 'dart:io' show Platform;
 import 'local_model_service.dart';
+
+// Conditional import for web compatibility
+// flutter_llama doesn't support web, so we stub it out for web builds
+import 'package:flutter_llama/flutter_llama.dart' if (dart.library.html) 'local_inference_stub.dart';
 
 class LocalInferenceService {
   LocalModelService _modelService;
-  LlamaModel? _model;
-  LlamaSession? _session;
+  dynamic _model;
+  dynamic _session;
   bool _isInitialized = false;
   bool _isGenerating = false;
 
@@ -53,7 +57,7 @@ class LocalInferenceService {
     _isGenerating = true;
 
     try {
-      final systemPrompt = '''You are a helpful legal assistant specializing in arbitration and dispute resolution. 
+      final systemPrompt = '''You are a helpful legal assistant specializing in arbitration and dispute resolution.
 Provide accurate, professional legal information while being clear and concise.
 Always consider the jurisdiction context when providing advice.''';
 

@@ -6,6 +6,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'local_inference_service.dart';
 import 'local_model_service.dart';
 
+// Use dio's MultipartFile to avoid conflict with http package
+import 'package:dio/dio.dart' as dio_pkg;
+
 class ApiService {
   late final Dio _dio;
   final String baseUrl;
@@ -245,7 +248,7 @@ class ApiService {
     bool useOcr = false,
   }) async {
     final formData = FormData.fromMap({
-      'file': await MultipartFile.fromFile(file.path),
+      'file': await dio_pkg.MultipartFile.fromFile(file.path),
       'title': title,
       'source_type': sourceType,
       'jurisdiction': jurisdiction,

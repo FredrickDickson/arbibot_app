@@ -1,10 +1,9 @@
+import 'dart:io' if (dart.library.html) 'stub_io.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:arbibot/core/app_export.dart';
-
-import 'dart:io' if (dart.library.html) 'stub_io.dart';
 
 extension ImageTypeExtension on String {
   ImageType get imageType {
@@ -139,14 +138,16 @@ class CustomImageWidget extends StatelessWidget {
               semanticLabel: semanticLabel,
             );
           }
-          return Image.file(
-            File(imageUrl!),
-            height: height,
-            width: width,
-            fit: fit ?? BoxFit.cover,
-            color: color,
-            semanticLabel: semanticLabel,
-          );
+          return kIsWeb
+              ? const SizedBox.shrink() // Image.file not supported on web
+              : Image.file(
+                  File(imageUrl!),
+                  height: height,
+                  width: width,
+                  fit: fit ?? BoxFit.cover,
+                  color: color,
+                  semanticLabel: semanticLabel,
+                );
         case ImageType.network:
           return CachedNetworkImage(
             height: height,
